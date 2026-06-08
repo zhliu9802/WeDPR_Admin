@@ -37,6 +37,7 @@ app_pid(){
 }
 
 JAVA_OPTS=" -Dfile.encoding=UTF-8"
+JAVA_OPTS+=" -Duser.timezone=Asia/Shanghai"
 JAVA_OPTS+=" -Djava.security.egd=file:/dev/./urandom"
 JAVA_OPTS+=" -Xmx256m -Xms256m -Xmn128m -Xss512k -XX:MetaspaceSize=128m -XX:MaxMetaspaceSize=256m"
 JAVA_OPTS+=" -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=${SHELL_FOLDER}/heap_error.log"

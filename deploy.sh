@@ -181,7 +181,7 @@ cmd_config() {
     local app_props="$conf_dir/application.properties"
     local wedpr_props="$conf_dir/wedpr.properties"
     local toml="$conf_dir/config.toml"
-    local jdbc="jdbc:mysql://$MYSQL_HOST:$MYSQL_PORT/$MYSQL_DB?characterEncoding=UTF-8&allowMultiQueries=true"
+    local jdbc="jdbc:mysql://$MYSQL_HOST:$MYSQL_PORT/$MYSQL_DB?characterEncoding=UTF-8&allowMultiQueries=true&serverTimezone=Asia/Shanghai"
 
     # application.properties: 端口 + 证书路径（默认指向 DEPLOY_DIR/conf）
     if [ -f "$app_props" ]; then
