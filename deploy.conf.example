@@ -1,0 +1,180 @@
+# =============================================================================
+# WeDPR 管理端一键部署配置文件
+# =============================================================================
+# 使用方式:
+#   1. cp deploy.conf.example deploy.conf
+#   2. 按实际环境修改 deploy.conf 中的值
+#   3. ./deploy.sh all
+#
+# 说明:
+#   - 本文件由 deploy.sh 通过 source 加载，格式为 KEY=VALUE
+#   - deploy.conf 含数据库密码、JWT 密钥等敏感信息，请勿提交到 Git
+#     （根目录 .gitignore 已忽略 deploy.conf）
+#   - 管理端与各机构站点端物理解耦、独立部署，运行时通过 Gateway 消息总线
+#     与 FISCO BCOS 区块链汇聚各机构上报的项目/任务/数据集信息
+#   - 完整说明见: docs/deployment_guide_v1.2.md
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 网络地址
+# -----------------------------------------------------------------------------
+
+# ADMIN_IP: 管理端服务器对外 IP 地址
+#   - 写入 wedpr.properties -> wedpr.transport.host_ip
+#   - 用于 Nginx server_name、status 命令中的访问提示
+#   - 示例: 平台管理员浏览器访问 http://10.60.94.1/
+ADMIN_IP=10.60.94.1
+
+# ADMIN_AGENCY: 管理端机构标识
+#   - 写入 wedpr.properties -> wedpr.admin_agency
+#   - 默认 ADMIN，一般无需修改
+ADMIN_AGENCY=ADMIN
+
+# HTTP_PORT: 管理端后端 HTTP 监听端口
+#   - 写入 application.properties -> server.port
+#   - 默认 6850；前端/Nginx 反向代理到此端口
+HTTP_PORT=6850
+
+# -----------------------------------------------------------------------------
+# MySQL 数据库
+# -----------------------------------------------------------------------------
+
+# MYSQL_HOST: MySQL 服务地址
+#   - 写入 JDBC 连接串 wedpr.mybatis.url
+#   - 数据库与管理端同机时填 127.0.0.1；独立数据库机填实际 IP
+MYSQL_HOST=127.0.0.1
+
+# MYSQL_PORT: MySQL 服务端口，写入 JDBC 连接串，默认 3306
+MYSQL_PORT=3306
+
+# MYSQL_DB: 管理端业务数据库名
+#   - init-db 时 CREATE DATABASE 的库名
+#   - 建议与站点端分库，管理端推荐使用 wedpr_admin
+MYSQL_DB=wedpr_admin
+
+# MYSQL_USER: 应用运行时使用的数据库账号
+#   - 写入 wedpr.properties -> wedpr.mybatis.username
+#   - 只需对 MYSQL_DB 库有读写权限，权限应小于 root
+MYSQL_USER=wedpr
+
+# MYSQL_PASSWORD: MYSQL_USER 的密码
+#   - 写入 wedpr.properties -> wedpr.mybatis.password
+#   - init-db 导入 SQL 时也使用此账号；生产环境请使用强密码
+MYSQL_PASSWORD=wedpr1234
+
+# MYSQL_ROOT_USER: 数据库管理员账号（仅 init-db 建库阶段使用）
+#   - 不写入应用配置，deploy.sh 内部临时使用
+#   - 用于 CREATE DATABASE、CREATE USER、GRANT 等管理操作
+MYSQL_ROOT_USER=root
+
+# MYSQL_ROOT_PASSWORD: MYSQL_ROOT_USER 的密码
+#   - 非空时: init-db 用 root 建库建用户，再用 MYSQL_USER 导入 SQL（推荐）
+#   - 为空时: init-db 尝试直接用 MYSQL_USER 建库（需该账号已有建库权限）
+#   - 管理端日常运行不依赖 root，仅首次部署 init-db / all 时需要
+MYSQL_ROOT_PASSWORD=
+
+# -----------------------------------------------------------------------------
+# 消息传输（Transport / Gateway）
+# -----------------------------------------------------------------------------
+
+# GATEWAY_TARGETS: 管理端连接的 Gateway 地址列表（gRPC）
+#   - 写入 wedpr.properties -> wedpr.transport.gateway_targets
+#   - 格式: ipv4:IP:PORT,IP:PORT，多个用英文逗号分隔
+#   - 管理端通过这些网关与各机构站点端互通消息
+GATEWAY_TARGETS=ipv4:127.0.0.1:45600,127.0.0.1:45601
+
+# TRANSPORT_NODE_ID: 管理端 Transport 节点 ID
+#   - 写入 wedpr.properties -> wedpr.transport.nodeID
+#   - 全平台唯一，管理端默认 admin
+TRANSPORT_NODE_ID=admin
+
+# TRANSPORT_LISTEN_PORT: 管理端 Transport 本地监听端口
+#   - 写入 wedpr.properties -> wedpr.transport.listen_port
+#   - 默认 6001；同机部署多实例时需错开
+TRANSPORT_LISTEN_PORT=6001
+
+# -----------------------------------------------------------------------------
+# 区块链 FISCO BCOS（跨机构元数据同步）
+# -----------------------------------------------------------------------------
+
+# BLOCKCHAIN_GROUP: 区块链群组 ID
+#   - 写入 wedpr.properties -> wedpr.chain.group_id
+#   - 写入 config.toml -> defaultGroup
+#   - 管理端与站点端、链上合约必须一致，通常为 group0
+BLOCKCHAIN_GROUP=group0
+
+# BLOCKCHAIN_PEERS: FISCO BCOS 节点 RPC 地址列表
+#   - 写入 config.toml -> peers=[...]
+#   - 格式: IP:PORT，多个用英文逗号分隔
+#   - 需同时将 ca.crt、sdk.crt、sdk.key 放到 conf/ 目录（仓库已含示例证书）
+BLOCKCHAIN_PEERS=127.0.0.1:30202,127.0.0.1:30203
+
+# RECORDER_FACTORY_CONTRACT: 资源记录工厂合约地址
+#   - 写入 wedpr.properties -> wedpr.sync.recorder.factory.contract_address
+#   - 部署 wedpr-sol 合约后从控制台获取，站点与管理端必须相同
+#   - 下方为仓库示例值，生产环境请替换为真实地址
+RECORDER_FACTORY_CONTRACT=0x4721d1a77e0e76851d460073e64ea06d9c104194
+
+# SEQUENCER_CONTRACT: 资源排序合约地址
+#   - 写入 wedpr.properties -> wedpr.sync.sequencer.contract_address
+SEQUENCER_CONTRACT=0x6849f21d1e455e9f0712b1e99fa4fcd23758e8f1
+
+# -----------------------------------------------------------------------------
+# 安全
+# -----------------------------------------------------------------------------
+
+# JWT_SECRET: 用户登录 JWT 签名密钥
+#   - 写入 wedpr.properties -> wedpr.user.jwt.secret
+#   - 生产环境务必修改为随机强密钥，切勿沿用示例值
+JWT_SECRET=please-change-me
+
+# -----------------------------------------------------------------------------
+# 安装路径
+# -----------------------------------------------------------------------------
+
+# DEPLOY_DIR: 管理端后端运行目录
+#   - 默认 /data/app/wedpr-admin
+#   - 注意: application.properties 中的证书路径默认指向该目录，
+#     若修改请同步调整 wedpr.cert.* 相关配置
+#   - 目录内应包含: apps/、lib/、conf/、start.sh、stop.sh
+DEPLOY_DIR=/data/app/wedpr-admin
+
+# WEB_DIR: 前端静态文件部署目录（Nginx root）
+#   - build 命令会将前端构建产物复制到此目录
+#   - 默认 /data/app/wedpr-admin/web
+WEB_DIR=/data/app/wedpr-admin/web
+
+# -----------------------------------------------------------------------------
+# Nginx 反向代理
+# -----------------------------------------------------------------------------
+
+# ENABLE_NGINX: 执行 ./deploy.sh all 时是否自动配置 Nginx
+#   - true  : all 命令在 root 下自动执行 nginx 子命令
+#   - false : 跳过，需手工配置 Web 服务器或直接用 HTTP_PORT 访问 API
+ENABLE_NGINX=true
+
+# NGINX_PORT: Nginx 对外监听端口
+#   - 默认 80；访问地址: http://${ADMIN_IP}:${NGINX_PORT}/
+NGINX_PORT=80
+
+# -----------------------------------------------------------------------------
+# 构建选项
+# -----------------------------------------------------------------------------
+
+# SKIP_TESTS: Gradle 构建是否跳过单元测试
+#   - true : 执行 ./gradlew :wedpr-admin:jar -x test，加快构建
+SKIP_TESTS=true
+
+# SKIP_NPM_INSTALL: 前端构建是否跳过 npm install
+#   - false: 每次 build 执行 npm install（首次或依赖变更时推荐）
+#   - true : 跳过 install 直接 build:pro（需 node_modules 已存在）
+SKIP_NPM_INSTALL=false
+
+# -----------------------------------------------------------------------------
+# 时区
+# -----------------------------------------------------------------------------
+
+# TIMEZONE: 系统时区
+#   - setup-timezone 时执行 timedatectl set-timezone
+#   - 中国地区推荐 Asia/Shanghai（UTC+8）
+TIMEZONE=Asia/Shanghai

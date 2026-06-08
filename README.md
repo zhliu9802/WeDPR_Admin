@@ -103,6 +103,32 @@ npm run serve
 npm run build:pro   # 产物输出到 manage/，由 Nginx 托管
 ```
 
+## 一键部署
+
+根目录提供 `deploy.sh` 脚本，封装了从构建到启动的完整流程。
+
+```bash
+# 1. 复制并修改配置（含数据库、区块链、网关等参数）
+cp deploy.conf.example deploy.conf
+vim deploy.conf
+
+# 2. 一键部署：构建 -> 建库导表 -> 渲染配置 -> 安装 -> Nginx -> 启动
+./deploy.sh all
+```
+
+也可分步执行：
+
+| 命令 | 说明 |
+|------|------|
+| `./deploy.sh build` | 构建共享组件、后端 jar 与前端静态文件 |
+| `./deploy.sh init-db` | 创建数据库并导入 DDL/DML |
+| `./deploy.sh config` | 按 `deploy.conf` 渲染后端配置文件 |
+| `./deploy.sh install` | 安装产物到 `DEPLOY_DIR` / `WEB_DIR` |
+| `sudo ./deploy.sh nginx` | 生成并启用 Nginx 反向代理 |
+| `./deploy.sh start` / `stop` / `restart` / `status` | 管理后端进程 |
+
+各配置项的含义见 [`deploy.conf.example`](deploy.conf.example) 内的逐项注释。`deploy.conf` 含数据库密码与 JWT 密钥等敏感信息，已被 `.gitignore` 忽略，请勿提交。完整的从零部署说明见 [`docs/`](docs/) 目录。
+
 ## 部署文档
 
 完整的从零部署指南（含环境准备、MySQL 安装、配置说明、运维命令与常见问题）见 [`docs/`](docs/) 目录，最新版本为 [`deployment_guide_v1.2.md`](docs/deployment_guide_v1.2.md)。

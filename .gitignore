@@ -34,3 +34,6 @@ node_modules/
 # Env / secrets
 *.env
 .env.*
+
+# 部署配置（含数据库密码、JWT 密钥等敏感信息）
+deploy.conf
