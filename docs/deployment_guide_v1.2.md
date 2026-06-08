@@ -1,0 +1,1423 @@
+# WeDPR 管理端部署指南（从零开始）
+
+> 本文档面向**完全零基础**的读者，手把手说明：如何在本地电脑或**单机纯净环境**上**构建**管理端，以及如何**部署运行**。
+>
+> 阅读本文档前，你只需要知道：管理端是一个 Web 管理后台，用来查看各机构的数据集、项目、任务等信息。代码位置见 [§1.2](#12-代码与-webui-位置)，瘦身指南见 [§2.8](#28-单机纯净环境编译--部署瘦身)。
+
+---
+
+## 目录
+
+1. [管理端是什么？](#1-管理端是什么)
+   - [1.2 代码与 WebUI 位置](#12-代码与-webui-位置)
+2. [部署前你需要知道的事](#2-部署前你需要知道的事)
+   - [2.8 单机纯净环境：编译 + 部署瘦身](#28-单机纯净环境编译--部署瘦身)
+3. [整体流程一览](#3-整体流程一览)
+4. [第一步：准备构建机（本地电脑）](#4-第一步准备构建机本地电脑)
+5. [第二步：在本地构建管理端](#5-第二步在本地构建管理端)
+6. [第三步：打包要上传到服务器的文件](#6-第三步打包要上传到服务器的文件)
+7. [第四步：准备目标服务器](#7-第四步准备目标服务器)
+8. [第五步：在服务器上安装 MySQL](#8-第五步在服务器上安装-mysql)
+9. [第六步：修改配置文件](#9-第六步修改配置文件)
+10. [第七步：启动管理端后端](#10-第七步启动管理端后端)
+11. [第八步：部署管理端前端（Nginx）](#11-第八步部署管理端前端nginx)
+12. [第九步：创建管理员账号并登录](#12-第九步创建管理员账号并登录)
+13. [第十步：验证部署是否成功](#13-第十步验证部署是否成功)
+14. [日常运维命令](#14-日常运维命令)
+15. [常见问题](#15-常见问题)
+16. [附录](#16-附录)
+
+---
+
+## 1. 管理端是什么？
+
+WeDPR 管理端（`WeDPR-admin`）包含两个部分：
+
+| 组件 | 目录 | 作用 | 默认端口 |
+|------|------|------|---------|
+| **后端** | `wedpr-admin/` | 提供 API 接口，汇聚各机构数据 | **6850** |
+| **前端** | `wedpr-web-admin/` | 浏览器访问的管理界面 | 开发时 **3001**，生产由 Nginx 提供 |
+
+管理端**不需要**安装站点端（`wedpr-site`），但运行时需要能连通：
+
+- **MySQL 数据库**（存管理端自己的数据）
+- **FISCO BCOS 区块链节点**（同步数据集等元数据）
+- **各机构 Gateway**（接收站点端上报的项目/任务数据）
+
+### 1.2 代码与 WebUI 位置
+
+管理端代码均在 `WeDPR-admin/` 目录下（已从 `WeDPR/` 解耦迁出）。**用户日常使用的 Web 管理界面在前端**；后端提供 REST API，另带 Swagger 调试页。
+
+#### 前端 WebUI（浏览器管理界面）
+
+| 项目 | 路径 |
+|------|------|
+| 源码根目录 | `WeDPR-admin/wedpr-web-admin/` |
+| 入口文件 | `wedpr-web-admin/src/main.js` |
+| 路由配置 | `wedpr-web-admin/src/router/index.js` |
+| 页面组件 | `wedpr-web-admin/src/views/` |
+| API 封装 | `wedpr-web-admin/src/apis/` |
+| 生产构建产物 | `wedpr-web-admin/manage/`（执行 `npm run build:pro` 后生成） |
+
+主要页面：
+
+| 功能 | 页面路径 |
+|------|---------|
+| 登录 | `views/adminLogin/index.vue` |
+| 布局（菜单/顶栏） | `views/layout/` |
+| 数据总览大屏 | `views/screen/index.vue` |
+| 机构管理 | `views/agencyManage/`、`views/agencyCreate/` |
+| 证书管理 | `views/certificateManage/`、`views/addCertificate/` |
+| 数据资源 | `views/adminDataManage/`、`views/adminDataDetail/` |
+| 项目空间 | `views/adminProjectManage/`、`views/adminProjectDetail/` |
+| 日志审计 | `views/adminLogManage/` |
+
+访问地址：
+
+| 环境 | 地址 |
+|------|------|
+| 开发环境 | `http://localhost:3001`（`npm run serve`） |
+| 生产环境 | Nginx 托管 `manage/` 目录（通常 80/443） |
+
+开发时 API 代理：`wedpr-web-admin/vue.config.js` 将 `/api` 转发到 `http://127.0.0.1:6850`。
+
+#### 后端（API 服务 + Swagger）
+
+| 项目 | 路径 |
+|------|------|
+| 源码根目录 | `WeDPR-admin/wedpr-admin/` |
+| 启动类 | `wedpr-admin/src/main/java/com/webank/wedpr/WedprAdminApplication.java` |
+| 管理端 Controller | `wedpr-admin/src/main/java/com/webank/wedpr/admin/controller/` |
+| 配置文件 | `wedpr-admin/conf/` |
+| 运行部署包 | `wedpr-admin/dist/`（编译后执行 `./start.sh`） |
+
+管理端自有 API Controller（9 个）：
+
+| Controller | 职责 |
+|-----------|------|
+| `WedprAgencyController` | 机构登记/启停 |
+| `WedprCertController` | 证书签发与管理 |
+| `WedprDatasetController` | 数据集元数据视图 |
+| `WedprProjectTableController` | 项目视图 |
+| `WedprJobTableController` | 任务视图 |
+| `WedprDashboardController` | 大屏统计 |
+| `WedprAuditLogController` | 链上同步审计日志 |
+| `WedprConfigTableController` | 系统配置 |
+| `WedprJobDatasetRelationController` | 任务-数据集关系 |
+
+- API 前缀：`/api/wedpr/v3`（管理端治理接口多在 `/api/wedpr/v3/admin/*`）
+- **后端没有业务 Web 页面**，主要提供 REST API
+- **Swagger API 文档**（调试用）：`http://localhost:6850/swagger-ui/index.html`（由 `springfox.documentation.enabled` 控制，生产 `conf/application.properties` 中通常为 `false`）
+
+#### 与站点端对比（避免混淆）
+
+| | 管理端 | 站点端 |
+|---|--------|--------|
+| 前端 WebUI | `WeDPR-admin/wedpr-web-admin/` | `WeDPR/wedpr-web/` |
+| 后端 | `WeDPR-admin/wedpr-admin/` | `WeDPR/wedpr-site/` |
+| 默认端口 | 前端 3001 / 后端 6850 | 前端 3000 / 后端 8005 |
+
+---
+
+## 2. 部署前你需要知道的事
+
+### 2.1 一句话结论
+
+| 阶段 | 需要什么 |
+|------|---------|
+| **编译管理端** | 把 `WeDPR-admin` 和 `WeDPR` **放在同一父目录下**即可，**不需要** `WeDPR-Component` 等其他目录 |
+| **部署到服务器** | **不需要**带这两个源码目录，只带构建好的部署包即可 |
+
+---
+
+### 2.2 能不能只拷贝 `WeDPR-admin` 目录？
+
+| 场景 | 是否可以 | 说明 |
+|------|---------|------|
+| **只拷贝 `WeDPR-admin` 在服务器上编译** | ❌ 不行 | 编译时还需要同级的 `WeDPR/` 目录（共享 Java 组件） |
+| **拷贝 `WeDPR-admin` + `WeDPR` 在服务器上编译** | ✅ 可以 | 两个目录同级放在一起即可完成编译 |
+| **拷贝已构建好的产物部署** | ✅ 可以 | **生产环境推荐方式**，无需源码 |
+
+---
+
+### 2.3 源码目录结构要求（仅编译时需要）
+
+如果你在本地或服务器上**从源码编译**，目录必须是这样：
+
+```
+你的工作目录/
+├── WeDPR/              ← 提供共享 Java 组件 + 数据库脚本
+└── WeDPR-admin/        ← 管理端自己的代码（必须与 WeDPR 同级）
+```
+
+验证命令：
+
+```bash
+# 进入你的工作目录，应能同时看到两个目录
+ls -d WeDPR WeDPR-admin
+
+# 编译依赖的共享组件应存在
+ls WeDPR/wedpr-common
+ls WeDPR/wedpr-components
+```
+
+> 如果你是从 Git 克隆的整个大仓库（例如 `Project/WeDPR/` 下同时有 `WeDPR/` 和 `WeDPR-admin/`），通常已经是这个结构。
+
+---
+
+### 2.4 `WeDPR` 目录里实际需要哪些部分？
+
+编译管理端时，`WeDPR-admin` 通过 `settings.gradle` 中的相对路径 `../WeDPR` 引用 `WeDPR` 仓库。**实际用到的**只是以下部分：
+
+| `WeDPR` 子目录 | 用途 | 编译时是否必须 |
+|---------------|------|--------------|
+| `wedpr-common/` | 公共协议与工具类 | ✅ 必须 |
+| `wedpr-components/` | 共享业务组件（数据库、同步、Transport 等） | ✅ 必须 |
+| `wedpr-builder/db/` | `wedpr_ddl.sql`、`wedpr_dml.sql` 数据库初始化脚本 | ✅ 打包部署时需要 |
+
+**不会被管理端编译使用**的 `WeDPR` 子目录（有也没关系，只是占磁盘）：
+
+| `WeDPR` 子目录 | 说明 |
+|---------------|------|
+| `wedpr-site/` | 站点端后端，管理端不需要 |
+| `wedpr-web/` | 站点端前端，管理端不需要 |
+| `wedpr-worker/` | 任务执行器，管理端不需要 |
+| `wedpr-pir/` | PIR 服务，管理端不需要 |
+| `wedpr-sol/` | 智能合约源码，管理端不需要（但运行时要连已部署的合约） |
+| `wedpr-web-components/` | 站点 UI 组件库，管理端前端不依赖 |
+
+因此：**带上完整的 `WeDPR` 目录完全没问题**，多出来的模块不会被管理端编译引用。
+
+#### `wedpr-components` 组件清单（当前 `settings.gradle` 要求目录均存在）
+
+在未修改 `WeDPR-admin/settings.gradle` 前，以下目录**必须保留**（即使部分模块未必参与实际编译）：
+
+```text
+WeDPR/wedpr-components/
+├── api-credential/          ├── hook/                 ├── security/
+├── authorization/           ├── http-client/          ├── service-publish/
+├── blockchain/              ├── initializer/          ├── service-sdk/pir/
+├── crypto/                  ├── key-generator/        ├── spi/
+├── dataset/                 ├── leader-election/      ├── storage/
+├── db-mapper/               ├── meta/                 ├── sync/
+│   ├── dataset/             │   ├── agency/           ├── task-plugin/
+│   └── service-publish/     │   ├── loadbalancer/   │   ├── api/
+├── env-integration/jupyter/ │   ├── project/        │   ├── pir/
+├── mybatis/                 │   ├── resource-follower/│   └── shell/
+├── quartz/                  │   ├── setting-template/ ├── token-auth/
+├── report/                  │   └── sys-config/       ├── transport/
+├── scheduler/               ├── user/                 └── uuid/
+```
+
+以及 `WeDPR/wedpr-common/protocol/`、`WeDPR/wedpr-common/utils/`。
+
+管理端后端**直接依赖**的 8 个组件（见 `wedpr-admin/build.gradle`）：`token-auth`、`mybatis`、`dataset`、`sync`、`sys-config`、`transport`、`initializer`、`security`。其余多为传递依赖或在 `settings.gradle` 中注册。
+
+---
+
+### 2.5 整个项目里不需要哪些顶层目录？
+
+管理端**编译和部署都不需要**以下与 `WeDPR`、`WeDPR-admin` 同级的目录：
+
+| 顶层目录 | 说明 | 是否需要 |
+|---------|------|---------|
+| `WeDPR-Component/` | C++ 隐私计算核心（Gateway、计算节点） | ❌ 不需要 |
+| `wedpr-cpp-deploy/` | C++ 节点运行时部署目录 | ❌ 不需要 |
+| `docs/` | 项目文档 | ❌ 不需要（可选阅读） |
+
+> 注意：管理端**运行时**需要能**网络连通**各机构的 C++ Gateway 和 FISCO BCOS 区块链节点，但**不需要**在管理端服务器上安装 `WeDPR-Component` 的代码。
+
+---
+
+### 2.6 编译 vs 部署：各需要什么？
+
+```
+【编译机 / 构建机】
+  需要目录：
+    WeDPR-admin/  +  WeDPR/（同级）
+  需要软件：
+    JDK + Node.js
+  产出：
+    wedpr-admin/dist/          → 后端部署包
+    wedpr-web-admin/manage/    → 前端静态文件
+    wedpr_ddl.sql + wedpr_dml.sql
+
+         │  打包上传（scp / rsync）
+         ▼
+
+【目标服务器（生产环境）】
+  需要文件：
+    打包后的 deploy 产物（backend + frontend + SQL）
+  需要软件：
+    JDK + MySQL + Nginx
+  需要外部服务（不是代码目录）：
+    FISCO BCOS 区块链节点（网络可达）
+    各机构 Gateway（网络可达，用于接收站点上报）
+```
+
+**不需要带到目标服务器的：**
+
+- `WeDPR-admin/` 源码
+- `WeDPR/` 源码
+- `WeDPR-Component/` 等任何其他代码目录
+
+---
+
+### 2.7 需要开放的端口
+
+| 端口 | 用途 | 是否必须对外开放 |
+|------|------|----------------|
+| 6850 | 管理端后端 API | 生产环境建议**不**直接对外，由 Nginx 反向代理 |
+| 80 / 443 | Nginx（前端页面） | ✅ 对外开放 |
+| 3306 | MySQL | 建议仅内网访问 |
+| 6001 | Transport 监听 | 内网，需能被各机构 Gateway 访问 |
+| 30202 等 | FISCO BCOS 节点 | 内网连通即可 |
+
+---
+
+### 2.8 单机纯净环境：编译 + 部署瘦身
+
+若你在**一台干净的机器**上同时完成编译和部署（不区分构建机与目标服务器），可按以下四阶段瘦身，把磁盘占用降到最低。
+
+#### 阶段 1：拷贝代码时先瘦 `WeDPR`
+
+目录结构必须是：
+
+```text
+/opt/wedpr/                     # 举例，任意路径均可
+├── WeDPR/                      # 瘦身后只保留必要部分
+└── WeDPR-admin/                # 完整保留
+```
+
+**`WeDPR/` 只保留：**
+
+```text
+WeDPR/
+├── wedpr-common/               # 整个目录
+├── wedpr-components/           # 整个目录（settings.gradle 要求）
+└── wedpr-builder/db/
+    ├── wedpr_ddl.sql
+    └── wedpr_dml.sql
+```
+
+**`WeDPR/` 可直接删除（管理端无用，体积大）：**
+
+| 目录/文件 | 说明 |
+|----------|------|
+| `wedpr-site/` | 站点后端 |
+| `wedpr-web/` | 站点前端 |
+| `wedpr-worker/`、`wedpr-pir/` | 其他服务 |
+| `wedpr-sol/` | 合约源码（链上合约需另部署） |
+| `wedpr-web-components/` | 站点 UI 库 |
+| `docker-files/`、`python/`、`static/` | 部署脚本与资源 |
+| `wedpr-builder/` 除 `db/` 外 | Python 部署生成器 |
+| `.git/` | 不需要版本历史时可删 |
+| 各模块下 `build/`、`dist/` | 历史构建产物 |
+
+**整台机器都不需要：** `WeDPR-Component/`、`wedpr-cpp-deploy/`、根目录 `docs/`（可选）。
+
+**`WeDPR-admin/`** 整目录保留（含 `wedpr-admin`、`wedpr-web-admin`、`gradlew` 等）。
+
+#### 阶段 2：安装软件并编译
+
+只需安装：**JDK 8/11**、**Node.js 16/18**、**MySQL 8**、**Nginx**。不需要 Gradle（有 `gradlew`）、C++ 环境、`WeDPR-Component`。
+
+```bash
+cd /opt/wedpr/WeDPR-admin
+chmod +x gradlew
+./gradlew :wedpr-admin:jar -x test
+
+cd wedpr-web-admin
+npm install
+npm run build:pro
+```
+
+或使用一键脚本：`./scripts/pack-deploy.sh`
+
+#### 阶段 3：整理为运行目录
+
+```bash
+sudo mkdir -p /data/app/wedpr-admin
+sudo cp -r wedpr-admin/dist/*      /data/app/wedpr-admin/backend/
+sudo cp -r wedpr-web-admin/manage  /data/app/wedpr-admin/frontend/
+sudo cp ../WeDPR/wedpr-builder/db/wedpr_ddl.sql /data/app/wedpr-admin/
+sudo cp ../WeDPR/wedpr-builder/db/wedpr_dml.sql /data/app/wedpr-admin/
+```
+
+然后按本文档第 8–11 章：初始化 MySQL、修改 `backend/conf/`、启动后端、配置 Nginx。
+
+#### 阶段 4：部署成功后删除源码（最瘦）
+
+服务跑通后，若短期内不重新编译，可删除全部源码：
+
+```bash
+rm -rf /opt/wedpr/WeDPR
+rm -rf /opt/wedpr/WeDPR-admin
+```
+
+**最终只保留运行目录：**
+
+```text
+/data/app/wedpr-admin/
+├── backend/          # apps、lib、conf、start.sh
+├── frontend/         # index.html、static/
+├── wedpr_ddl.sql     # 已导入后可删
+└── wedpr_dml.sql     # 已导入后可删
+```
+
+外加系统软件：JDK、MySQL、Nginx。
+
+#### 瘦身方案对照
+
+| 方案 | 做法 | 风险 |
+|------|------|------|
+| **A：安全瘦身（推荐）** | 删 `WeDPR` 顶层站点目录 + 构建产物；保留完整 `wedpr-common` + `wedpr-components` | 低 |
+| **B：编译后删源码** | 只留 `/data/app/wedpr-admin/` 运行目录 | 低 |
+| **C：深度瘦身** | 修改 `settings.gradle` 去掉未引用组件后再删目录 | 需改工程并验证编译 |
+
+#### 单机部署检查清单
+
+```text
+□ 拷贝瘦身后 WeDPR-admin + WeDPR（同级）
+□ 安装 JDK、Node.js、MySQL、Nginx
+□ ./gradlew :wedpr-admin:jar -x test
+□ cd wedpr-web-admin && npm install && npm run build:pro
+□ 拷贝 dist + manage 到 /data/app/wedpr-admin/
+□ MySQL 导入 ddl + dml，修改 conf，start.sh，配 Nginx
+□ 浏览器验证登录与功能
+□ （可选）删除 /opt/wedpr/WeDPR 和 WeDPR-admin 源码
+```
+
+> 编译完成后 **`WeDPR/` 整目录可删**，运行不依赖它。管理端要能看见站点数据，还需网络连通 FISCO BCOS 与各机构 Gateway（非代码目录）。
+
+---
+
+## 3. 整体流程一览
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  构建机（你的开发电脑 / CI 服务器）                            │
+│                                                             │
+│  1. 安装 JDK、Node.js、Gradle 依赖环境                       │
+│  2. 编译后端 → 生成 wedpr-admin/dist/                        │
+│  3. 编译前端 → 生成 wedpr-web-admin/manage/                  │
+│  4. 打包 dist + manage + DDL + 配置文件                      │
+└──────────────────────────┬──────────────────────────────────┘
+                           │  scp / rsync 上传
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│  目标服务器（生产环境）                                       │
+│                                                             │
+│  1. 安装 JDK、MySQL、Nginx                                   │
+│  2. 初始化数据库（执行 DDL + DML）                            │
+│  3. 修改 conf/ 下的配置文件                                  │
+│  4. 启动后端 ./start.sh                                      │
+│  5. 配置 Nginx 托管前端 + 反向代理 API                        │
+│  6. 浏览器访问，用 agency_admin 账号登录                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 4. 第一步：准备构建机（本地电脑）
+
+构建机是你用来**编译代码**的电脑，可以是开发机，也可以是 CI 服务器。
+
+### 4.1 需要安装的软件
+
+| 软件 | 版本要求 | 用途 |
+|------|---------|------|
+| **JDK** | 8 或以上（推荐 JDK 8 或 11） | 编译和运行 Java 后端 |
+| **Node.js** | 16.x 或 18.x（LTS） | 编译 Vue 前端 |
+| **npm** | 随 Node.js 自带 | 安装前端依赖 |
+| **Git** | 任意较新版本 | 拉取代码（如需要） |
+
+> Gradle 构建工具已包含在项目中（`gradlew` 脚本），**不需要**单独安装 Gradle。
+
+### 4.2 Ubuntu / Debian 安装命令
+
+```bash
+# 更新软件源
+sudo apt update
+
+# 安装 JDK 11
+sudo apt install -y openjdk-11-jdk
+
+# 验证 Java
+java -version
+# 应看到类似：openjdk version "11.0.x"
+
+# 设置 JAVA_HOME（添加到 ~/.bashrc 永久生效）
+echo 'export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64' >> ~/.bashrc
+echo 'export PATH=$JAVA_HOME/bin:$PATH' >> ~/.bashrc
+source ~/.bashrc
+
+# 安装 Node.js 18（通过 NodeSource）
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt install -y nodejs
+
+# 验证 Node.js 和 npm
+node -v    # 应显示 v18.x.x
+npm -v     # 应显示 9.x 或 10.x
+
+# 安装 Git（如果没有）
+sudo apt install -y git
+```
+
+### 4.3 CentOS / RHEL 安装命令
+
+```bash
+# 安装 JDK 11
+sudo yum install -y java-11-openjdk java-11-openjdk-devel
+
+# 设置 JAVA_HOME
+echo 'export JAVA_HOME=/usr/lib/jvm/java-11-openjdk' >> ~/.bashrc
+source ~/.bashrc
+
+# 安装 Node.js 18
+curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
+sudo yum install -y nodejs
+
+# 验证
+java -version
+node -v
+npm -v
+```
+
+### 4.4 macOS 安装命令
+
+```bash
+# 安装 Homebrew（如果没有）
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# 安装 JDK 11
+brew install openjdk@11
+echo 'export JAVA_HOME=$(/usr/libexec/java_home -v 11)' >> ~/.zshrc
+source ~/.zshrc
+
+# 安装 Node.js
+brew install node@18
+echo 'export PATH="/opt/homebrew/opt/node@18/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+
+# 验证
+java -version
+node -v
+```
+
+---
+
+## 5. 第二步：在本地构建管理端
+
+### 5.1 确认目录结构
+
+开始编译前，请先确认 [§2.3 源码目录结构要求](#23-源码目录结构要求) 已满足：
+
+```bash
+# 进入你的工作目录，确认两个目录同级存在
+ls -d WeDPR WeDPR-admin
+# 应同时输出：
+# WeDPR
+# WeDPR-admin
+
+# 确认编译依赖的共享组件存在
+ls WeDPR/wedpr-common/utils
+ls WeDPR/wedpr-components/dataset
+```
+
+如果缺少 `WeDPR` 目录，或两者不是同级，管理端**无法编译**。  
+**不需要** `WeDPR-Component` 等其他顶层目录，详见 [§2.5](#25-整个项目里不需要哪些顶层目录)。
+
+### 5.2 构建后端（Java）
+
+```bash
+cd WeDPR-admin
+
+# 赋予 gradlew 执行权限（首次需要）
+chmod +x gradlew
+
+# 编译后端，跳过测试以加快速度
+./gradlew :wedpr-admin:jar -x test
+```
+
+**构建成功的标志：**
+
+- 终端最后显示 `BUILD SUCCESSFUL`
+- 生成目录 `wedpr-admin/dist/`，其中包含：
+  - `apps/` — 主程序 jar
+  - `lib/` — 依赖库（约 400 个 jar）
+  - `conf/` — 配置文件
+  - `start.sh` / `stop.sh` — 启停脚本
+
+```bash
+# 检查构建产物
+ls wedpr-admin/dist/
+# 应看到：apps  conf  lib  start.sh  stop.sh
+```
+
+### 5.3 构建前端（Vue）
+
+```bash
+cd WeDPR-admin/wedpr-web-admin
+
+# 安装依赖（首次需要，可能需要几分钟）
+npm install
+
+# 生产环境构建
+npm run build:pro
+```
+
+**构建成功的标志：**
+
+- 终端显示 `Build complete`
+- 生成目录 `manage/`，其中包含 `index.html` 和 `static/` 等静态文件
+
+```bash
+# 检查前端产物
+ls manage/
+# 应看到：index.html  static/  favicon.ico 等
+```
+
+### 5.4 本地开发调试（可选）
+
+如果你只是想在本机**试运行**，不需要部署到服务器：
+
+```bash
+# 终端 1：启动后端
+cd WeDPR-admin/wedpr-admin/dist
+export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64   # 按实际路径修改
+./start.sh
+
+# 终端 2：启动前端开发服务器
+cd WeDPR-admin/wedpr-web-admin
+npm run serve
+# 浏览器访问 http://localhost:3001
+```
+
+---
+
+## 6. 第三步：打包要上传到服务器的文件
+
+在构建机上执行：
+
+```bash
+# 假设当前在 WeDPR-admin 目录
+cd /path/to/WeDPR-admin
+
+# 创建打包目录
+mkdir -p /tmp/wedpr-admin-deploy
+
+# 1. 拷贝后端部署包
+cp -r wedpr-admin/dist /tmp/wedpr-admin-deploy/backend
+
+# 2. 拷贝前端静态文件
+cp -r wedpr-web-admin/manage /tmp/wedpr-admin-deploy/frontend
+
+# 3. 拷贝数据库初始化脚本（在 WeDPR 仓库中）
+cp ../WeDPR/wedpr-builder/db/wedpr_ddl.sql /tmp/wedpr-admin-deploy/
+cp ../WeDPR/wedpr-builder/db/wedpr_dml.sql /tmp/wedpr-admin-deploy/
+
+# 4. 打成压缩包
+cd /tmp
+tar czvf wedpr-admin-deploy.tar.gz wedpr-admin-deploy/
+
+echo "打包完成：/tmp/wedpr-admin-deploy.tar.gz"
+ls -lh /tmp/wedpr-admin-deploy.tar.gz
+```
+
+### 打包后的目录结构
+
+```
+wedpr-admin-deploy/
+├── backend/                  # 后端，直接部署
+│   ├── apps/
+│   ├── lib/
+│   ├── conf/                 # ⚠️ 部署前必须修改
+│   ├── start.sh
+│   └── stop.sh
+├── frontend/                 # 前端静态文件，交给 Nginx
+│   ├── index.html
+│   └── static/
+├── wedpr_ddl.sql             # 建表脚本
+└── wedpr_dml.sql             # 初始数据脚本
+```
+
+### 上传到目标服务器
+
+```bash
+# 将压缩包上传到服务器（把 user 和 server-ip 换成你的）
+scp /tmp/wedpr-admin-deploy.tar.gz user@server-ip:/opt/
+
+# SSH 登录服务器后解压
+ssh user@server-ip
+cd /opt
+sudo tar xzvf wedpr-admin-deploy.tar.gz
+sudo mv wedpr-admin-deploy /data/app/wedpr-admin
+```
+
+---
+
+## 7. 第四步：准备目标服务器
+
+目标服务器是**生产环境**运行管理端的机器。
+
+### 7.1 服务器最低配置建议
+
+| 项目 | 建议值 |
+|------|--------|
+| CPU | 2 核及以上 |
+| 内存 | 4 GB 及以上（后端默认占用约 256 MB 堆内存） |
+| 磁盘 | 20 GB 及以上 |
+| 操作系统 | Ubuntu 20.04/22.04、CentOS 7/8 |
+
+### 7.2 安装 JDK
+
+```bash
+# Ubuntu
+sudo apt update
+sudo apt install -y openjdk-11-jdk
+
+# 设置环境变量
+echo 'export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64' | sudo tee -a /etc/profile.d/wedpr.sh
+echo 'export PATH=$JAVA_HOME/bin:$PATH' | sudo tee -a /etc/profile.d/wedpr.sh
+source /etc/profile.d/wedpr.sh
+
+# 验证
+java -version
+```
+
+### 7.3 安装 Nginx
+
+```bash
+# Ubuntu
+sudo apt install -y nginx
+
+# CentOS
+sudo yum install -y nginx
+
+# 启动并设置开机自启
+sudo systemctl start nginx
+sudo systemctl enable nginx
+
+# 验证（应看到 Nginx 欢迎页）
+curl http://localhost
+```
+
+### 7.4 安装网络工具（排障用）
+
+```bash
+# Ubuntu
+sudo apt install -y curl wget net-tools telnet unzip openssl
+
+# CentOS
+sudo yum install -y curl wget net-tools telnet unzip openssl
+```
+
+---
+
+## 8. 第五步：在服务器上安装 MySQL
+
+管理端需要独立的 MySQL 数据库。
+
+### 8.1 安装 MySQL 8
+
+```bash
+# Ubuntu 22.04
+sudo apt update
+sudo apt install -y mysql-server
+
+# 启动 MySQL
+sudo systemctl start mysql
+sudo systemctl enable mysql
+
+# 查看状态（应显示 active (running)）
+sudo systemctl status mysql
+```
+
+### 8.2 安全配置（设置 root 密码）
+
+```bash
+sudo mysql_secure_installation
+```
+
+按提示操作：
+- 设置 root 密码（请记住这个密码）
+- 移除匿名用户：Yes
+- 禁止 root 远程登录：Yes（推荐）
+- 移除 test 数据库：Yes
+
+### 8.3 创建数据库和用户
+
+```bash
+# 登录 MySQL（使用你设置的 root 密码）
+sudo mysql -u root -p
+```
+
+在 MySQL 命令行中执行：
+
+```sql
+-- 创建数据库
+CREATE DATABASE wedpr3 CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
+
+-- 创建专用用户（把 your_password 换成强密码）
+CREATE USER 'wedpr_admin'@'localhost' IDENTIFIED BY 'your_password';
+CREATE USER 'wedpr_admin'@'127.0.0.1' IDENTIFIED BY 'your_password';
+
+-- 授权
+GRANT ALL PRIVILEGES ON wedpr3.* TO 'wedpr_admin'@'localhost';
+GRANT ALL PRIVILEGES ON wedpr3.* TO 'wedpr_admin'@'127.0.0.1';
+FLUSH PRIVILEGES;
+
+-- 退出
+EXIT;
+```
+
+### 8.4 执行建表和初始数据脚本
+
+```bash
+cd /data/app/wedpr-admin
+
+# 建表
+mysql -u wedpr_admin -p wedpr3 < wedpr_ddl.sql
+
+# 初始数据（算法模板、默认用户组等）
+mysql -u wedpr_admin -p wedpr3 < wedpr_dml.sql
+
+# 验证表是否创建成功
+mysql -u wedpr_admin -p wedpr3 -e "SHOW TABLES;"
+# 应看到 wedpr_agency、wedpr_user、wedpr_config_table 等表
+```
+
+---
+
+## 9. 第六步：修改配置文件
+
+所有配置文件在 `backend/conf/` 目录下。**部署前必须修改**，否则服务无法正常启动。
+
+```bash
+cd /data/app/wedpr-admin/backend/conf
+ls -la
+# 主要文件：
+# application.properties    — 服务端口、证书路径
+# application-wedpr.properties — Spring 应用配置
+# wedpr.properties        — 数据库、区块链、Transport（最重要）
+# config.toml             — FISCO BCOS 链连接配置
+```
+
+### 9.1 修改 `wedpr.properties`（最重要）
+
+用编辑器打开：
+
+```bash
+vi /data/app/wedpr-admin/backend/conf/wedpr.properties
+# 或使用 nano：
+# nano /data/app/wedpr-admin/backend/conf/wedpr.properties
+```
+
+需要修改的配置项：
+
+```properties
+# ========== 数据库配置 ==========
+# 把 127.0.0.1 换成你的 MySQL 地址，wedpr3 是数据库名
+wedpr.mybatis.url=jdbc:mysql://127.0.0.1/wedpr3?characterEncoding=UTF-8&allowMultiQueries=true
+# 填入第 8.3 步创建的用户名和密码
+wedpr.mybatis.username=wedpr_admin
+wedpr.mybatis.password=your_password
+
+# ========== 区块链配置 ==========
+# 与各站点端保持完全一致！
+wedpr.chain.group_id=group0
+wedpr.chain.config_path=config.toml
+
+# 合约地址（部署 wedpr-sol 合约后获得，各站点端必须相同）
+wedpr.sync.recorder.factory.contract_address=0x你的合约地址
+wedpr.sync.sequencer.contract_address=0x你的合约地址
+
+# ========== Transport 配置 ==========
+# 各机构 Gateway 地址，多个用逗号分隔
+# 格式：ipv4:IP地址:端口
+wedpr.transport.gateway_targets=ipv4:192.168.1.100:45600,ipv4:192.168.1.101:45600
+
+# 管理端 Transport 监听（一般保持默认即可）
+wedpr.transport.listen_ip=0.0.0.0
+wedpr.transport.listen_port=6001
+```
+
+> **重要提示：**
+> - `wedpr.sync.*.contract_address` 必须与所有站点端配置**完全相同**
+> - `wedpr.transport.gateway_targets` 必须填写**真实可达**的各机构 Gateway 地址
+> - 如果暂时没有区块链和 Gateway，可以先填占位值让服务启动，但管理端无法看到站点数据
+
+### 9.2 修改 `config.toml`（区块链连接）
+
+```bash
+vi /data/app/wedpr-admin/backend/conf/config.toml
+```
+
+```toml
+[cryptoMaterial]
+certPath = "conf"
+disableSsl = "false"
+useSMCrypto = "false"
+
+[network]
+messageTimeout = "10000"
+defaultGroup = "group0"
+# 改成你的 FISCO BCOS 节点地址
+peers = ["192.168.1.50:30202", "192.168.1.50:30203"]
+```
+
+### 9.3 配置区块链证书
+
+FISCO BCOS 需要 SSL 证书才能连接节点。将以下三个文件放到 `conf/` 目录：
+
+```
+backend/conf/
+├── ca.crt      ← 链 CA 证书
+├── sdk.crt     ← SDK 证书
+└── sdk.key     ← SDK 私钥
+```
+
+证书通常由 FISCO BCOS 运维人员提供，或从链节点的 `sdk/` 目录获取。
+
+```bash
+# 检查证书是否存在
+ls -la /data/app/wedpr-admin/backend/conf/*.crt
+ls -la /data/app/wedpr-admin/backend/conf/*.key
+```
+
+### 9.4 修改 `application.properties`
+
+```bash
+vi /data/app/wedpr-admin/backend/conf/application.properties
+```
+
+主要确认以下配置：
+
+```properties
+# 后端监听端口（默认 6850，一般不用改）
+server.port=6850
+
+# 证书工具路径（改成服务器上的实际部署路径）
+wedpr.cert.certScriptDir=/data/app/wedpr-admin/backend/conf
+wedpr.cert.certScript=/data/app/wedpr-admin/backend/conf/cert_script.sh
+wedpr.cert.rootCertPath=/data/app/wedpr-admin/backend/conf/cert/root
+wedpr.cert.agencyCertPath=/data/app/wedpr-admin/backend/conf/cert/agency
+```
+
+---
+
+## 10. 第七步：启动管理端后端
+
+### 10.1 启动
+
+```bash
+cd /data/app/wedpr-admin/backend
+
+# 确认 JAVA_HOME 已设置
+echo $JAVA_HOME
+java -version
+
+# 启动服务
+./start.sh
+```
+
+**启动成功的标志：**
+
+```bash
+# 查看启动日志
+tail -f start.out
+# 应看到类似：WedprAdminApplication start successfully!
+
+# 或检查进程
+ps aux | grep WedprAdminApplication
+
+# 检查端口
+ss -tlnp | grep 6850
+# 或：netstat -tlnp | grep 6850
+```
+
+### 10.2 停止
+
+```bash
+cd /data/app/wedpr-admin/backend
+./stop.sh
+```
+
+### 10.3 查看运行日志
+
+```bash
+# 启动输出
+cat /data/app/wedpr-admin/backend/start.out
+
+# 运行日志
+tail -f /data/app/wedpr-admin/backend/logs/wedpr-admin/wedpr-admin.log
+```
+
+### 10.4 设置开机自启（可选）
+
+创建 systemd 服务：
+
+```bash
+sudo tee /etc/systemd/system/wedpr-admin.service << 'EOF'
+[Unit]
+Description=WeDPR Admin Backend
+After=network.target mysql.service
+
+[Service]
+Type=forking
+User=root
+WorkingDirectory=/data/app/wedpr-admin/backend
+Environment=JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+ExecStart=/data/app/wedpr-admin/backend/start.sh
+ExecStop=/data/app/wedpr-admin/backend/stop.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 启用并启动
+sudo systemctl daemon-reload
+sudo systemctl enable wedpr-admin
+sudo systemctl start wedpr-admin
+sudo systemctl status wedpr-admin
+```
+
+---
+
+## 11. 第八步：部署管理端前端（Nginx）
+
+生产环境中，前端静态文件由 Nginx 托管，API 请求反向代理到后端 6850 端口。
+
+### 11.1 创建 Nginx 配置
+
+```bash
+sudo tee /etc/nginx/sites-available/wedpr-admin << 'EOF'
+server {
+    listen 80;
+    server_name admin.example.com;    # 改成你的域名或服务器 IP
+
+    # 前端静态文件目录
+    root /data/app/wedpr-admin/frontend;
+    index index.html;
+
+    # 前端路由（Vue SPA 需要）
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # API 反向代理到后端
+    location /api/ {
+        proxy_pass http://127.0.0.1:6850;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 超时设置（部分接口可能较慢）
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    # 静态资源缓存
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2)$ {
+        expires 7d;
+        add_header Cache-Control "public, immutable";
+    }
+}
+EOF
+```
+
+### 11.2 启用配置
+
+```bash
+# 创建软链接启用站点
+sudo ln -sf /etc/nginx/sites-available/wedpr-admin /etc/nginx/sites-enabled/
+
+# 删除默认站点（可选）
+sudo rm -f /etc/nginx/sites-enabled/default
+
+# 测试配置语法
+sudo nginx -t
+# 应显示：syntax is ok / test is successful
+
+# 重新加载 Nginx
+sudo systemctl reload nginx
+```
+
+### 11.3 配置 HTTPS（生产环境推荐）
+
+如果有域名，建议用 Let's Encrypt 免费证书：
+
+```bash
+# 安装 certbot
+sudo apt install -y certbot python3-certbot-nginx
+
+# 自动配置 HTTPS（把域名换成你的）
+sudo certbot --nginx -d admin.example.com
+```
+
+---
+
+## 12. 第九步：创建管理员账号并登录
+
+管理端登录需要 **`agency_admin`** 角色的账号（与站点端的 `admin_user` 不同）。
+
+### 12.1 创建平台管理员账号
+
+`wedpr_dml.sql` 默认只创建了站点端的 `admin` 用户（角色为 `admin_user`），管理端需要额外创建 `agency_admin` 角色用户：
+
+```bash
+mysql -u wedpr_admin -p wedpr3
+```
+
+```sql
+-- 创建平台管理员账号（用户名：platform_admin，密码：Admin@123）
+-- 密码使用 bcrypt 加密存储
+INSERT INTO wedpr_user (username, password, status)
+VALUES ('platform_admin', '{bcrypt}$2a$10$9ZhDOBp.sRKat4l14ygu/.LscxrMUcDAfeVOEPiYwbcRkoB09gCmi', 0);
+
+-- 分配 agency_admin 角色（role_id = 10）
+INSERT INTO wedpr_user_role (username, role_id) VALUES ('platform_admin', '10');
+
+-- 验证
+SELECT u.username, r.role_id
+FROM wedpr_user u
+JOIN wedpr_user_role r ON u.username = r.username
+WHERE u.username = 'platform_admin';
+
+EXIT;
+```
+
+> 上述密码哈希对应的明文密码为 **`Admin@123`**（WeDPR 默认测试密码）。
+> 生产环境请登录后立即修改密码，或自行生成 bcrypt 哈希替换。
+
+### 12.2 登录管理台
+
+1. 浏览器打开 `http://你的服务器IP` 或 `http://admin.example.com`
+2. 进入管理台登录页
+3. 输入：
+   - 账号：`platform_admin`
+   - 密码：`Admin@123`
+   - 验证码：按页面显示输入
+4. 登录成功后进入管理台首页
+
+### 12.3 登记机构（接入站点端）
+
+登录后，在「机构管理」页面登记各站点端机构：
+
+| 字段 | 说明 | 示例 |
+|------|------|------|
+| 机构英文名 | 必须与站点端 `wedpr.agency` 一致 | `agency0` |
+| Gateway 地址 | 该机构的 C++ Gateway 地址 | `192.168.1.100:40600` |
+
+---
+
+## 13. 第十步：验证部署是否成功
+
+按以下清单逐项检查：
+
+### 13.1 后端健康检查
+
+```bash
+# 1. 进程在运行
+ps aux | grep WedprAdminApplication
+
+# 2. 端口在监听
+ss -tlnp | grep 6850
+
+# 3. API 可访问（获取验证码接口，无需登录）
+curl -s http://127.0.0.1:6850/api/wedpr/v3/image-code | head -c 200
+# 应返回 JSON，code 为 0
+```
+
+### 13.2 前端健康检查
+
+```bash
+# Nginx 能返回首页
+curl -s -o /dev/null -w "%{http_code}" http://localhost/
+# 应返回 200
+
+# API 代理正常
+curl -s http://localhost/api/wedpr/v3/image-code | head -c 200
+# 应返回 JSON
+```
+
+### 13.3 功能验证
+
+| 检查项 | 操作 | 预期结果 |
+|--------|------|---------|
+| 登录 | 用 platform_admin 登录 | 进入管理台 |
+| 机构管理 | 登记一个机构 | 保存成功 |
+| 区块链连通 | 查看日志无链连接报错 | `wedpr-admin.log` 无 ERROR |
+| 站点数据 | 站点端跑任务后查看大屏 | 能看到统计数据 |
+
+### 13.4 接入站点端后的完整验证
+
+当站点端也部署完成后，确认以下条件全部满足：
+
+```
+✓ wedpr_agency 表中存在该机构且已启用
+✓ gateway_endpoint 与实际 Gateway 地址一致
+✓ 管理端 gateway_targets 能连通该 Gateway
+✓ 站点端与管理端合约地址、chain.group_id 一致
+✓ 站点端 ReportQuartzJob 正常运行
+✓ 站点端 ResourceSyncer 正常运行
+```
+
+---
+
+## 14. 日常运维命令
+
+```bash
+# 启动后端
+cd /data/app/wedpr-admin/backend && ./start.sh
+
+# 停止后端
+cd /data/app/wedpr-admin/backend && ./stop.sh
+
+# 查看后端日志
+tail -f /data/app/wedpr-admin/backend/logs/wedpr-admin/wedpr-admin.log
+
+# 重启 Nginx
+sudo systemctl reload nginx
+
+# 查看 Nginx 日志
+sudo tail -f /var/log/nginx/access.log
+sudo tail -f /var/log/nginx/error.log
+
+# 检查 MySQL 连接
+mysql -u wedpr_admin -p wedpr3 -e "SELECT COUNT(*) FROM wedpr_agency;"
+```
+
+---
+
+## 15. 常见问题
+
+### Q1：是不是只要把 `WeDPR-admin` 和 `WeDPR` 放在一起就能编译和部署？
+
+**编译：** 是的。两个目录放在同一父目录下，安装好 JDK 和 Node.js，即可完成管理端编译。不需要 `WeDPR-Component`、`wedpr-cpp-deploy` 等其他目录。`WeDPR` 里实际用到的是 `wedpr-common/`、`wedpr-components/` 和 `wedpr-builder/db/`，其他子目录（如 `wedpr-site/`）有也不影响编译。
+
+**部署：** 不是。目标服务器不需要带这两个源码目录，只需要上传 [§6 打包](#6-第三步打包要上传到服务器的文件) 后的 `deploy` 产物，并在服务器上安装 JDK、MySQL、Nginx。
+
+详见 [§2 部署前你需要知道的事](#2-部署前你需要知道的事)。
+
+### Q2：构建时报错 `project :wedpr-common-utils not found`
+
+**原因：** `WeDPR-admin` 与 `WeDPR` 目录不是同级关系。
+
+**解决：**
+
+```bash
+# 在 WeDPR-admin 目录下确认能否找到共享组件
+ls ../WeDPR/wedpr-common/utils
+# 如果找不到，需要将 WeDPR 仓库放到 WeDPR-admin 的同级目录
+```
+
+### Q3：启动后端报数据库连接失败
+
+**排查步骤：**
+
+```bash
+# 1. 确认 MySQL 在运行
+sudo systemctl status mysql
+
+# 2. 手动测试连接
+mysql -u wedpr_admin -p -h 127.0.0.1 wedpr3
+
+# 3. 检查 wedpr.properties 中的 url、username、password 是否正确
+cat /data/app/wedpr-admin/backend/conf/wedpr.properties | grep mybatis
+```
+
+### Q4：登录提示「无权限访问该接口」
+
+**原因：** 登录账号的角色不是 `agency_admin`。
+
+**解决：** 按 [第 12.1 步](#121-创建平台管理员账号) 创建 `agency_admin` 角色用户。
+
+### Q5：管理端看不到站点端数据
+
+**排查清单：**
+
+1. 机构是否已在「机构管理」中登记？
+2. `wedpr.transport.gateway_targets` 地址是否正确且网络可达？
+   ```bash
+   telnet 192.168.1.100 45600
+   ```
+3. 合约地址是否与站点端一致？
+4. 站点端 `ReportQuartzJob` 是否在运行？（查看站点端日志）
+
+### Q6：前端页面空白或 404
+
+**排查步骤：**
+
+```bash
+# 1. 确认前端文件存在
+ls /data/app/wedpr-admin/frontend/index.html
+
+# 2. 确认 Nginx 配置中 root 路径正确
+sudo nginx -t
+
+# 3. 查看 Nginx 错误日志
+sudo tail -20 /var/log/nginx/error.log
+```
+
+### Q7：`start.sh` 提示 JAVA_HOME 未配置
+
+```bash
+# 查找 Java 安装路径
+update-alternatives --list java
+# 或
+ls /usr/lib/jvm/
+
+# 设置 JAVA_HOME 后重新启动
+export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+cd /data/app/wedpr-admin/backend
+./start.sh
+```
+
+### Q8：端口 6850 被占用
+
+```bash
+# 查看占用进程
+ss -tlnp | grep 6850
+
+# 停止旧进程
+cd /data/app/wedpr-admin/backend
+./stop.sh
+```
+
+### Q9：管理端前端和后端 WebUI 在哪里？
+
+- **业务 Web 界面（给人用的）**：`WeDPR-admin/wedpr-web-admin/`，开发访问 `http://localhost:3001`，生产由 Nginx 托管 `manage/` 目录。详见 [§1.2](#12-代码与-webui-位置)。
+- **后端**：`WeDPR-admin/wedpr-admin/`，提供 REST API，**没有业务 Web 页面**；调试用 Swagger：`http://localhost:6850/swagger-ui/index.html`。
+
+### Q10：单机纯净环境上编译+部署，怎么瘦身？
+
+按 [§2.8](#28-单机纯净环境编译--部署瘦身) 四阶段操作：拷贝时删掉 `WeDPR` 里站点端目录 → 编译 → 部署到 `/data/app/wedpr-admin/` → 可选删除全部源码。编译完成后 `WeDPR/` 整目录可删。
+
+---
+
+## 16. 附录
+
+### 16.1 完整端口列表
+
+| 端口 | 服务 | 说明 |
+|------|------|------|
+| 80/443 | Nginx | 前端页面 + API 代理 |
+| 6850 | wedpr-admin 后端 | 仅本机或内网 |
+| 3306 | MySQL | 数据库 |
+| 6001 | Transport | 管理端消息监听 |
+| 30202+ | FISCO BCOS | 区块链节点 RPC |
+
+### 16.2 配置文件速查
+
+| 文件 | 关键配置项 |
+|------|-----------|
+| `wedpr.properties` | 数据库、合约地址、Gateway 地址 |
+| `config.toml` | 区块链节点 peers |
+| `application.properties` | 服务端口 6850、证书路径 |
+| `conf/ca.crt` + `sdk.crt` + `sdk.key` | 区块链 SSL 证书 |
+
+### 16.3 角色说明
+
+| 角色 | 使用场景 | 登录入口 |
+|------|---------|---------|
+| `agency_admin` | 平台管理端 | `wedpr-web-admin`（管理台） |
+| `admin_user` | 机构站点端 | `wedpr-web`（站点台） |
+
+### 16.4 目录依赖速查
+
+| 问题 | 答案 |
+|------|------|
+| 编译需要哪些代码目录？ | `WeDPR-admin/` + `WeDPR/`（同级） |
+| `WeDPR` 里实际用到什么？ | `wedpr-common/`、`wedpr-components/`、`wedpr-builder/db/` |
+| `WeDPR` 里可删什么？ | `wedpr-site`、`wedpr-web`、`wedpr-worker`、`wedpr-pir`、`wedpr-sol`、`wedpr-web-components` 等，见 [§2.8](#28-单机纯净环境编译--部署瘦身) |
+| 需要 `WeDPR-Component` 吗？ | ❌ 不需要（运行时需网络连通 Gateway） |
+| 需要 `wedpr-site` / `wedpr-web` 吗？ | ❌ 编译不需要（它们是站点端） |
+| 单机编译+部署怎么瘦身？ | 先瘦 `WeDPR` → 编译 → 部署 → 删源码，见 [§2.8](#28-单机纯净环境编译--部署瘦身) |
+| 目标服务器需要源码吗？ | ❌ 不需要，只需 deploy 打包产物 |
+| 目标服务器需要什么软件？ | JDK + MySQL + Nginx |
+
+### 16.5 管理端代码路径速查
+
+| 类型 | 路径 | 访问方式 |
+|------|------|---------|
+| 前端 WebUI 源码 | `WeDPR-admin/wedpr-web-admin/src/views/` | 开发：`http://localhost:3001` |
+| 前端构建产物 | `WeDPR-admin/wedpr-web-admin/manage/` | 生产：Nginx 托管 |
+| 后端 API 源码 | `WeDPR-admin/wedpr-admin/src/main/java/.../admin/controller/` | — |
+| 后端运行包 | `WeDPR-admin/wedpr-admin/dist/` | `./start.sh`，端口 6850 |
+| Swagger 调试页 | — | `http://<host>:6850/swagger-ui/index.html` |
+| 站点端前端（对比） | `WeDPR/wedpr-web/` | 端口 3000，与管理端无关 |
+
+### 16.6 相关文档
+
+- 管理端与站点端接入规范：`docs/architecture/phase1_admin_site_integration.md`
+- 区块链部署与同步：`docs/architecture/phase5_blockchain_contract_deploy_and_onchain_data_sync.md`
+- 站点端部署：参见 `WeDPR/` 仓库相关文档
+
+### 16.7 一键打包脚本
+
+项目已提供打包脚本 `WeDPR-admin/scripts/pack-deploy.sh`，内容如下：
+
+```bash
+#!/bin/bash
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ADMIN_ROOT="$(dirname "$SCRIPT_DIR")"
+WEDPR_ROOT="$(dirname "$ADMIN_ROOT")/WeDPR"
+OUTPUT="/tmp/wedpr-admin-deploy"
+
+echo "=== WeDPR 管理端部署包构建 ==="
+
+# 检查依赖
+if [ ! -d "$WEDPR_ROOT/wedpr-common" ]; then
+    echo "错误：找不到 $WEDPR_ROOT/wedpr-common"
+    echo "请确保 WeDPR 与 WeDPR-admin 在同一父目录下"
+    exit 1
+fi
+
+# 构建后端
+echo ">>> 构建后端..."
+cd "$ADMIN_ROOT"
+./gradlew :wedpr-admin:jar -x test
+
+# 构建前端
+echo ">>> 构建前端..."
+cd "$ADMIN_ROOT/wedpr-web-admin"
+npm install
+npm run build:pro
+
+# 打包
+echo ">>> 打包..."
+rm -rf "$OUTPUT"
+mkdir -p "$OUTPUT"
+cp -r "$ADMIN_ROOT/wedpr-admin/dist" "$OUTPUT/backend"
+cp -r "$ADMIN_ROOT/wedpr-web-admin/manage" "$OUTPUT/frontend"
+cp "$WEDPR_ROOT/wedpr-builder/db/wedpr_ddl.sql" "$OUTPUT/"
+cp "$WEDPR_ROOT/wedpr-builder/db/wedpr_dml.sql" "$OUTPUT/"
+
+cd /tmp
+tar czvf wedpr-admin-deploy.tar.gz wedpr-admin-deploy/
+
+echo ""
+echo "=== 打包完成 ==="
+echo "文件位置：/tmp/wedpr-admin-deploy.tar.gz"
+echo "上传到服务器后解压到 /data/app/wedpr-admin 即可部署"
+ls -lh /tmp/wedpr-admin-deploy.tar.gz
+```
+
+使用方法（需在 `WeDPR-admin` 与 `WeDPR` 同级目录的前提下执行）：
+
+```bash
+chmod +x WeDPR-admin/scripts/pack-deploy.sh
+./WeDPR-admin/scripts/pack-deploy.sh
+```
+
+---
+
+*文档版本：2026-06-08（含代码路径、WebUI 位置、单机瘦身指南）| 适用 WeDPR 3.1.0*

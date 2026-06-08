@@ -1,0 +1,36 @@
+# OS
+.DS_Store
+
+# Java / Gradle
+.gradle/
+build/
+dist/
+out/
+*.class
+*.log
+
+# Distribution / bundled deps
+**/dist/lib/
+**/dist/apps/
+**/dist/conf/
+
+# Node / frontend
+node_modules/
+.npm/
+.pnpm-store/
+*.local
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# Build wrappers cache (keep gradle/wrapper/*.jar)
+!gradle/wrapper/gradle-wrapper.jar
+
+# Env / secrets
+*.env
+.env.*
