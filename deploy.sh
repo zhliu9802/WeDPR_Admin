@@ -16,6 +16,7 @@
 #   restart        重启管理端后端
 #   status         查看运行状态与访问地址
 #   setup-timezone 设置系统时区（需 root）
+#   gen-secret     生成随机 JWT_SECRET（带 --write 则写回 deploy.conf）
 #   all            一键执行: build -> init-db -> config -> install -> [nginx] -> start
 #
 # 配置: 首次使用先 cp deploy.conf.example deploy.conf 并按需修改
@@ -334,6 +335,28 @@ cmd_setup_timezone() {
     log_info "系统时区已设置为 $TIMEZONE"
 }
 
+# ----------------------------- gen-secret -----------------------------------
+# 生成随机 JWT 签名密钥。默认仅打印；--write 则写回 deploy.conf 的 JWT_SECRET
+cmd_gen_secret() {
+    command -v openssl >/dev/null 2>&1 || die "未找到 openssl，无法生成随机密钥"
+    local secret; secret="$(openssl rand -hex 32)"
+
+    if [ "${1:-}" = "--write" ]; then
+        [ -f "$CONF_FILE" ] || die "未找到 deploy.conf，请先 cp deploy.conf.example deploy.conf"
+        if grep -qE '^[[:space:]]*JWT_SECRET=' "$CONF_FILE"; then
+            sed -i.bak -E "s|^[[:space:]]*JWT_SECRET=.*|JWT_SECRET=$secret|" "$CONF_FILE"
+            rm -f "$CONF_FILE.bak"
+        else
+            printf '\nJWT_SECRET=%s\n' "$secret" >> "$CONF_FILE"
+        fi
+        log_info "已将新 JWT_SECRET 写入 deploy.conf"
+        log_warn "更换密钥后，此前已签发的登录令牌全部失效，用户需重新登录"
+    else
+        echo "$secret"
+        log_info "如需写回 deploy.conf，执行: ./deploy.sh gen-secret --write"
+    fi
+}
+
 # ----------------------------- all ------------------------------------------
 cmd_all() {
     cmd_build
@@ -369,6 +392,7 @@ main() {
         restart)        load_conf; cmd_restart ;;
         status)         load_conf; cmd_status ;;
         setup-timezone) load_conf; cmd_setup_timezone ;;
+        gen-secret)     cmd_gen_secret "${2:-}" ;;
         all)            load_conf; cmd_all ;;
         ""|-h|--help|help) usage ;;
         *)              log_error "未知命令: $cmd"; echo; usage; exit 1 ;;

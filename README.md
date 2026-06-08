@@ -125,6 +125,7 @@ vim deploy.conf
 | `./deploy.sh config` | 按 `deploy.conf` 渲染后端配置文件 |
 | `./deploy.sh install` | 安装产物到 `DEPLOY_DIR` / `WEB_DIR` |
 | `sudo ./deploy.sh nginx` | 生成并启用 Nginx 反向代理 |
+| `./deploy.sh gen-secret [--write]` | 生成随机 JWT 密钥，`--write` 直接写回 deploy.conf |
 | `./deploy.sh start` / `stop` / `restart` / `status` | 管理后端进程 |
 
 各配置项的含义见 [`deploy.conf.example`](deploy.conf.example) 内的逐项注释。`deploy.conf` 含数据库密码与 JWT 密钥等敏感信息，已被 `.gitignore` 忽略，请勿提交。完整的从零部署说明见 [`docs/`](docs/) 目录。
