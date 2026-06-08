@@ -77,10 +77,16 @@ MYSQL_ROOT_PASSWORD=
 # 消息传输（Transport / Gateway）
 # -----------------------------------------------------------------------------
 
-# GATEWAY_TARGETS: 管理端连接的 Gateway 地址列表（gRPC）
+# GATEWAY_TARGETS: 管理端连接的 Gateway(网关)gRPC 地址
 #   - 写入 wedpr.properties -> wedpr.transport.gateway_targets
-#   - 格式: ipv4:IP:PORT,IP:PORT，多个用英文逗号分隔
-#   - 管理端通过这些网关与各机构站点端互通消息
+#   - 格式(gRPC 标准): ipv4:IP1:PORT1,IP2:PORT2
+#     注意 ipv4: 前缀只在开头写一次，后面跟逗号分隔的 IP:PORT 列表
+#   - 填的是 Gateway 地址，不是站点端地址。各机构站点端接在 Gateway 之后，
+#     对管理端透明，因此与站点数量无关：
+#       * 单 Gateway 部署(最常见): 只填一个地址即可，即使后面接多个站点也不用改
+#       * 多 Gateway 部署(高可用/多接入点): 才需逗号列出多个，SDK 在其间容灾
+#   - 默认值为本机两个端口，仅供单机自测；生产环境填真实可达的 Gateway 地址
+#   - 端口默认 45600，需管理端机器网络可达(防火墙放行)
 GATEWAY_TARGETS=ipv4:127.0.0.1:45600,127.0.0.1:45601
 
 # TRANSPORT_NODE_ID: 管理端 Transport 节点 ID

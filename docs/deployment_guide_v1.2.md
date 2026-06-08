@@ -835,8 +835,10 @@ wedpr.sync.sequencer.contract_address=0x你的合约地址
 
 # ========== Transport 配置 ==========
 # 各机构 Gateway 地址，多个用逗号分隔
-# 格式：ipv4:IP地址:端口
-wedpr.transport.gateway_targets=ipv4:192.168.1.100:45600,ipv4:192.168.1.101:45600
+# 格式：ipv4:IP1:端口,IP2:端口（ipv4: 前缀只在开头写一次）
+# 注意：这里填 Gateway 地址而非站点端地址，与站点数量无关；
+#       单 Gateway 部署只需填一个，多 Gateway 才逗号列出多个
+wedpr.transport.gateway_targets=ipv4:192.168.1.100:45600,192.168.1.101:45600
 
 # 管理端 Transport 监听（一般保持默认即可）
 wedpr.transport.listen_ip=0.0.0.0
